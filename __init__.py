@@ -8,11 +8,11 @@
 import Arcus  # @UnusedImport
 import Savitar  # @UnusedImport
 
-from . import PostProcessingPlugin
+from . import MyPostProcessingPlugin
 
 
 def getMetaData():
     return {}
 
 def register(app):
-    return {"extension": PostProcessingPlugin.PostProcessingPlugin()}
+    return {"extension": MyPostProcessingPlugin.MyPostProcessingPlugin()}

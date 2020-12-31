@@ -57,7 +57,7 @@ import re
 
 
 # this was broken up into a separate class so the main ChangeZ script could be debugged outside of Cura
-class ChangeAtZ(Script):
+class MyChangeAtZ(Script):
     version = "5.2.1"
 
     def getSettingDataString(self):
@@ -66,6 +66,7 @@ class ChangeAtZ(Script):
             "key": "ChangeAtZ",
             "metadata": {},
             "version": 2,
+            "is_active": true,
             "settings": {
                 "caz_enabled": {
                     "label": "Enabled",

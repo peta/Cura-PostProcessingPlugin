@@ -1,7 +1,7 @@
 {
-    "name": "Post Processing",
-    "author": "Ultimaker",
-    "version": "2.2.1",
+    "name": "My Post Processing",
+    "author": "Peter",
+    "version": "1.0.0",
     "api": "7.4.0",
     "description": "Extension that allows for user created scripts for post processing",
     "catalog": "cura"

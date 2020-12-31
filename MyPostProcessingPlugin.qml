@@ -15,7 +15,7 @@ UM.Dialog
 {
     id: dialog
 
-    title: catalog.i18nc("@title:window", "Post Processing Plugin")
+    title: catalog.i18nc("@title:window", "My Post Processing Plugin")
     width: 700 * screenScaleFactor;
     height: 500 * screenScaleFactor;
     minimumWidth: 400 * screenScaleFactor;
@@ -54,7 +54,7 @@ UM.Dialog
             Label
             {
                 id: activeScriptsHeader
-                text: catalog.i18nc("@label", "Post Processing Scripts")
+                text: catalog.i18nc("@label", "My Post Processing Scripts")
                 anchors.top: parent.top
                 anchors.topMargin: base.textMargin
                 anchors.left: parent.left
@@ -83,12 +83,26 @@ UM.Dialog
                 delegate: Item
                 {
                     width: parent.width
-                    height: activeScriptButton.height
+                    height: activeScriptButton.height                    
+
+                    property bool prevCheckedState: manager.scriptStates[index]
+                    CheckBox {
+                        id: isScriptActive
+                        text: ""
+                        checked: manager.scriptStates[index]
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: {
+                            manager.setSelectedScriptIndexState(index, checked)
+                        }
+                    }
                     Button
                     {
                         id: activeScriptButton
                         text: manager.getScriptLabelByKey(modelData.toString())
                         exclusiveGroup: selectedScriptGroup
+                        anchors.left: parent.left
+                        anchors.leftMargin: 20
                         width: parent.width
                         height: UM.Theme.getSize("setting").height
                         checkable: true
@@ -477,17 +491,38 @@ UM.Dialog
         }
     }
 
-    rightButtons: Button
-    {
-        text: catalog.i18nc("@action:button", "Close")
-        iconName: "dialog-close"
-        onClicked: dialog.accept()
-    }
+    rightButtons: [
+        Button
+        {
+            text: catalog.i18nc("@action:button", "Enable all")
+            tooltip: "Enable all scripts from above list so that they will execute and modify the generated GCODE"
+            onClicked: {
+                manager.setAllScriptsState(true)
+                forceActiveFocus()
+            }
+        },
+        Button
+        {
+            text: catalog.i18nc("@action:button", "Disable all")
+            tooltip: "Disable all scripts from above list so that they will not execute and thus not modify any GCODE"
+            onClicked: {
+                manager.setAllScriptsState(false)
+                forceActiveFocus()
+            }
+        },
+        Button
+        {
+            text: catalog.i18nc("@action:button", "Close")
+            iconName: "dialog-close"
+            onClicked: dialog.accept()
+        }
+    ]
 
     Item
     {
         objectName: "postProcessingSaveAreaButton"
-        visible: activeScriptsList.count > 0
+        // visible: activeScriptsList.count > 0
+        visible: true
         height: UM.Theme.getSize("action_button").height
         width: height
 
@@ -497,16 +532,19 @@ UM.Dialog
             tooltip:
             {
                 var tipText = catalog.i18nc("@info:tooltip", "Change active post-processing scripts.");
-                if (activeScriptsList.count > 0)
+                var nEnabledScripts = scriptStates.filter(function(x) { return x; }).length;
+                if (nEnabledScripts > 0)
                 {
                     tipText += "<br><br>" + catalog.i18ncp("@info:tooltip",
                         "The following script is active:",
                         "The following scripts are active:",
-                        activeScriptsList.count
+                        nEnabledScripts
                     ) + "<ul>";
-                    for(var i = 0; i < activeScriptsList.count; i++)
+                    for(var i = 0; i < scriptStates; i++)
                     {
-                        tipText += "<li>" + manager.getScriptLabelByKey(manager.scriptList[i]) + "</li>";
+                        if (scriptStates[i] === true) {
+                            tipText += "<li>" + manager.getScriptLabelByKey(manager.scriptList[i]) + "</li>";
+                        }
                     }
                     tipText += "</ul>";
                 }
@@ -517,6 +555,35 @@ UM.Dialog
             iconSource: "postprocessing.svg"
             fixedWidthMode: false
         }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: {
+                if (mouse.button === Qt.RightButton) {
+                    myContextMenu.popup()
+                } else {
+                    dialog.show()
+                }
+            }
+        }
+
+        Menu {
+          id: myContextMenu
+          MenuItem {
+              text: "Manage"
+              onTriggered: dialog.show()
+          }
+          MenuItem {
+              text: "Disable all"
+              onTriggered: manager.setAllScriptsState(false)
+          }
+          MenuItem {
+              text: "Enable all"
+              onTriggered: manager.setAllScriptsState(true)
+          }
+      }
+
 
         Cura.NotificationIcon
         {

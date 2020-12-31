@@ -1,5 +1,6 @@
 # Copyright (c) 2015 Jaime van Kessel
 # Copyright (c) 2018 Ultimaker B.V.
+# Modified 2020 by Peter Geil, https://github.com/peta, Minor UX-tweak (bulk enable/disable all scripts)
 # The PostProcessingPlugin is released under the terms of the AGPLv3 or higher.
 from typing import Optional, Any, Dict, TYPE_CHECKING, List
 
@@ -33,6 +34,17 @@ class Script:
         self._definition = None  # type: Optional[DefinitionContainerInterface]
         self._instance = None  # type: Optional[InstanceContainer]
 
+    @property
+    def is_active(self) -> bool:
+        state = self._instance.getMetaDataEntry("is_active", default=True)
+        if (type(state) != bool):
+            state = (state == "True")
+        return state
+
+    @is_active.setter
+    def is_active(self, state : bool):
+        self._instance.setMetaDataEntry("is_active", state)
+
     def initialize(self) -> None:
         setting_data = self.getSettingData()
         self._stack = ContainerStack(stack_id=str(id(self)))
@@ -59,6 +71,8 @@ class Script:
         self._instance.setDefinition(self._definition.getId())
         self._instance.setMetaDataEntry("setting_version",
                                         self._definition.getMetaDataEntry("setting_version", default=0))
+        self._instance.setMetaDataEntry("is_active",
+                                        self._definition.getMetaDataEntry("is_active", default=True))
         self._stack.addContainer(self._instance)
         self._stack.propertyChanged.connect(self._onPropertyChanged)
 
@@ -113,6 +127,9 @@ class Script:
         if self._stack is not None:
             return self._stack.getProperty(key, "value")
         return None
+
+    def serialize(self) -> None:
+        return "---\n\n".join((self._stack.serialize(), *(c.serialize() for c in self._stack.getContainers())))
 
     def getValue(self, line: str, key: str, default = None) -> Any:
         """Convenience function that finds the value in a line of g-code.

@@ -1,4 +1,5 @@
 # Copyright (c) 2018 Jaime van Kessel, Ultimaker B.V.
+# Modified 2020 by Peter Geil, https://github.com/peta, Minor UX-tweak (bulk enable/disable all scripts)
 # The PostProcessingPlugin is released under the terms of the AGPLv3 or higher.
 
 import configparser  # The script lists are stored in metadata as serialised config files.
@@ -7,6 +8,7 @@ import io  # To allow configparser to write to a string.
 import os.path
 import pkgutil
 import sys
+import json
 from typing import Dict, Type, TYPE_CHECKING, List, Optional, cast
 
 from PyQt5.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
@@ -21,19 +23,21 @@ from UM.i18n import i18nCatalog
 from cura import ApplicationMetadata
 from cura.CuraApplication import CuraApplication
 
+GLOBAL_STACK_NAME = "my_post_processing_scripts"
+
 i18n_catalog = i18nCatalog("cura")
 
 if TYPE_CHECKING:
     from .Script import Script
 
 
-class PostProcessingPlugin(QObject, Extension):
+class MyPostProcessingPlugin(QObject, Extension):
     """Extension type plugin that enables pre-written scripts to post process g-code files."""
     def __init__(self, parent = None) -> None:
         QObject.__init__(self, parent)
         Extension.__init__(self)
-        self.setMenuName(i18n_catalog.i18nc("@item:inmenu", "Post Processing"))
-        self.addMenuItem(i18n_catalog.i18nc("@item:inmenu", "Modify G-Code"), self.showPopup)
+        self.setMenuName(i18n_catalog.i18nc("@item:inmenu", "My Post Processing"))
+        self.addMenuItem(i18n_catalog.i18nc("@item:inmenu", "☠ Modify G-Code v2"), self.showPopup)
         self._view = None
 
         # Loaded scripts are all scripts that can be used
@@ -86,9 +90,9 @@ class PostProcessingPlugin(QObject, Extension):
             return
 
         if ";POSTPROCESSED" not in gcode_list[0]:
-            for script in self._script_list:
+            for active_script in [a for a in self._script_list if a.is_active]:
                 try:
-                    gcode_list = script.execute(gcode_list)
+                    gcode_list = active_script.execute(gcode_list)
                 except Exception:
                     Logger.logException("e", "Exception in post-processing script.")
             if len(self._script_list):  # Add comment to g-code if any changes were made.
@@ -116,6 +120,7 @@ class PostProcessingPlugin(QObject, Extension):
             # Magical switch code.
             self._script_list[new_index], self._script_list[index] = self._script_list[index], self._script_list[new_index]
             self.scriptListChanged.emit()
+            self.scriptStatesChanged.emit()
             self.selectedIndexChanged.emit() #Ensure that settings are updated
             self._propertyChanged()
 
@@ -127,6 +132,7 @@ class PostProcessingPlugin(QObject, Extension):
         if len(self._script_list) - 1 < self._selected_script_index:
             self._selected_script_index = len(self._script_list) - 1
         self.scriptListChanged.emit()
+        self.scriptStatesChanged.emit()
         self.selectedIndexChanged.emit()  # Ensure that settings are updated
         self._propertyChanged()
 
@@ -142,7 +148,7 @@ class PostProcessingPlugin(QObject, Extension):
         # The PostProcessingPlugin path is for built-in scripts.
         # The Resources path is where the user should store custom scripts.
         # The Preferences path is legacy, where the user may previously have stored scripts.
-        for root in [PluginRegistry.getInstance().getPluginPath("PostProcessingPlugin"), Resources.getStoragePath(Resources.Resources), Resources.getStoragePath(Resources.Preferences)]:
+        for root in [PluginRegistry.getInstance().getPluginPath("MyPostProcessingPlugin"), Resources.getStoragePath(Resources.Resources), Resources.getStoragePath(Resources.Preferences)]:
             if root is None:
                 continue
             path = os.path.join(root, "scripts")
@@ -239,7 +245,49 @@ class PostProcessingPlugin(QObject, Extension):
         self._script_list.append(new_script)
         self.setSelectedScriptIndex(len(self._script_list) - 1)
         self.scriptListChanged.emit()
+        self.scriptStatesChanged.emit()
         self._propertyChanged()
+
+    scriptStatesChanged = pyqtSignal()
+
+    @pyqtProperty("QVariantList", notify=scriptStatesChanged)
+    def scriptStates(self) -> List[bool]:
+        script_states = [script.is_active for script in self._script_list]
+        Logger.log("d", "Get script states %s", json.dumps(script_states))
+        return script_states
+
+    @pyqtSlot(bool)
+    def setAllScriptsState(self, state : bool) -> None:
+        Logger.log("d", 'Setting state ("%s") for all scripts (%s)', "enabled" if state else "disabled", len(self._script_list))
+        for script in self._script_list:
+            script.is_active = state
+            Logger.log("d", "%s", script.is_active)
+        self.scriptStatesChanged.emit()
+        self._propertyChanged()
+
+    @pyqtSlot(int, bool)
+    def setSelectedScriptIndexState(self, index: int, state: bool) -> None:
+        Logger.log("d", 'Going to set script with index #%s to state "%s"', index, "enabled" if state else "disabled")
+        if len(self._script_list) == 0 or (index < 0 or index > len(self._script_list) - 1):
+            return  # nothing needs to be done
+        else:
+            script = self._script_list[index]
+            scriptLabel = self.getScriptLabelByKey(script.getSettingData()["key"])
+            Logger.log("d", 'Disabled script #%s with name "%s"', index, scriptLabel)
+            script.is_active = state
+            Logger.log("d", script.serialize())
+            self.scriptStatesChanged.emit()
+            self._propertyChanged()
+
+    @pyqtSlot(int, result = bool)
+    def getSelectedScriptIndexState(self, index: int) -> Optional[bool]:
+        if len(self._script_list) == 0 or (index < 0 or index > len(self._script_list) - 1):
+            return  # nothing needs to be done
+        else:
+            script = self._script_list[index]
+            state = script.is_active
+            Logger.log("d", 'Getting state for script #%s ("%s")', index, "enabled" if state else "disabled")
+            return state
 
     def _restoreScriptInforFromMetadata(self):
         self.loadAllScripts()
@@ -247,13 +295,14 @@ class PostProcessingPlugin(QObject, Extension):
         if new_stack is None:
             return
         self._script_list.clear()
-        if not new_stack.getMetaDataEntry("post_processing_scripts"):  # Missing or empty.
+        if not new_stack.getMetaDataEntry(GLOBAL_STACK_NAME):  # Missing or empty.
             self.scriptListChanged.emit()  # Even emit this if it didn't change. We want it to write the empty list to the stack's metadata.
+            self.scriptStatesChanged.emit()
             self.setSelectedScriptIndex(-1)
             return
 
         self._script_list.clear()
-        scripts_list_strs = new_stack.getMetaDataEntry("post_processing_scripts")
+        scripts_list_strs = new_stack.getMetaDataEntry(GLOBAL_STACK_NAME)
         for script_str in scripts_list_strs.split(
                 "\n"):  # Encoded config files should never contain three newlines in a row. At most 2, just before section headers.
             if not script_str:  # There were no scripts in this one (or a corrupt file caused more than 3 consecutive newlines here).
@@ -278,13 +327,17 @@ class PostProcessingPlugin(QObject, Extension):
                 new_script.initialize()
                 for setting_key, setting_value in settings.items():  # Put all setting values into the script.
                     if new_script._instance is not None:
-                        new_script._instance.setProperty(setting_key, "value", setting_value)
+                        if (setting_key.startswith("meta__")):
+                            new_script._instance.setMetaDataEntry(setting_key[6:], setting_value)
+                        else:
+                            new_script._instance.setProperty(setting_key, "value", setting_value)
                 self._script_list.append(new_script)
 
         self.setSelectedScriptIndex(0)
         # Ensure that we always force an update (otherwise the fields don't update correctly!)
         self.selectedIndexChanged.emit()
         self.scriptListChanged.emit()
+        self.scriptStatesChanged.emit()
         self._propertyChanged()
 
     def _onGlobalContainerStackChanged(self) -> None:
@@ -306,6 +359,7 @@ class PostProcessingPlugin(QObject, Extension):
             parser.optionxform = str  # type: ignore # Don't transform the setting keys as they are case-sensitive.
             script_name = script.getSettingData()["key"]
             parser.add_section(script_name)
+            parser[script_name]["meta__is_active"] = str(script.is_active)
             for key in script.getSettingData()["settings"]:
                 value = script.getSettingValueByKey(key)
                 parser[script_name][key] = str(value)
@@ -324,10 +378,10 @@ class PostProcessingPlugin(QObject, Extension):
         # Ensure we don't get triggered by our own write.
         self._global_container_stack.metaDataChanged.disconnect(self._restoreScriptInforFromMetadata)
 
-        if "post_processing_scripts" not in self._global_container_stack.getMetaData():
-            self._global_container_stack.setMetaDataEntry("post_processing_scripts", "")
+        if GLOBAL_STACK_NAME not in self._global_container_stack.getMetaData():
+            self._global_container_stack.setMetaDataEntry(GLOBAL_STACK_NAME, "")
 
-        self._global_container_stack.setMetaDataEntry("post_processing_scripts", script_list_string)
+        self._global_container_stack.setMetaDataEntry(GLOBAL_STACK_NAME, script_list_string)
         # We do want to listen to other events.
         self._global_container_stack.metaDataChanged.connect(self._restoreScriptInforFromMetadata)
 
@@ -342,7 +396,7 @@ class PostProcessingPlugin(QObject, Extension):
         self.loadAllScripts()
 
         # Create the plugin dialog component
-        path = os.path.join(cast(str, PluginRegistry.getInstance().getPluginPath("PostProcessingPlugin")), "PostProcessingPlugin.qml")
+        path = os.path.join(cast(str, PluginRegistry.getInstance().getPluginPath("MyPostProcessingPlugin")), "MyPostProcessingPlugin.qml")
         self._view = CuraApplication.getInstance().createQmlComponent(path, {"manager": self})
         if self._view is None:
             Logger.log("e", "Not creating PostProcessing button near save button because the QML component failed to be created.")
@@ -371,7 +425,7 @@ class PostProcessingPlugin(QObject, Extension):
         """
         global_container_stack = Application.getInstance().getGlobalContainerStack()
         if global_container_stack is not None:
-            global_container_stack.propertyChanged.emit("post_processing_plugin", "value")
+            global_container_stack.propertyChanged.emit("my_post_processing_plugin", "value")
 
     @staticmethod
     def _isScriptAllowed(file_path: str) -> bool:
@@ -381,7 +435,7 @@ class PostProcessingPlugin(QObject, Extension):
             return True
 
         dir_path = os.path.split(file_path)[0]  # type: str
-        plugin_path = PluginRegistry.getInstance().getPluginPath("PostProcessingPlugin")
+        plugin_path = PluginRegistry.getInstance().getPluginPath("MyPostProcessingPlugin")
         assert plugin_path is not None  # appease mypy
         bundled_path = os.path.join(plugin_path, "scripts")
         if dir_path == bundled_path:
