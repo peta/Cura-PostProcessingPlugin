@@ -1,2 +1,2 @@
-# MyPostProcessingPlugin
-A post processing plugin for Cura 
+# Cura-PostProcessingPlugin
+Improved version of Cura's Post Processing Plugin
